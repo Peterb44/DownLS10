@@ -452,7 +452,7 @@ object DownloadsRepository {
                 item.localUri = created.toString()
                 output = appContext.contentResolver.openOutputStream(created, "w")
             } else {
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val dir = downloadDirectory()
                 if (!dir.exists()) dir.mkdirs()
                 val target = File(dir, name)
                 file = target
@@ -608,7 +608,7 @@ object DownloadsRepository {
                 }
             )
         } else {
-            val saveDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val saveDir = downloadDirectory()
             if (!saveDir.exists()) saveDir.mkdirs()
             downloadEngine.downloadFile(
                 item = item,
@@ -660,7 +660,7 @@ object DownloadsRepository {
                     runCatching { appContext.contentResolver.delete(Uri.parse(uriString), null, null) }
                 }
             } else {
-                val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), item.fileName)
+                val file = File(downloadDirectory(), item.fileName)
                 if (file.exists()) file.delete()
             }
         }
@@ -681,9 +681,13 @@ object DownloadsRepository {
                 findDownloadUriByName(context.contentResolver, item.fileName) != null
             }
         } else {
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), item.fileName).exists()
+            File(downloadDirectory(), item.fileName).exists()
         }
     }
+
+    /** مجلد التنزيلات المطلوب: /sdcard/DownLS10/ */
+    private fun downloadDirectory(): File =
+        File(Environment.getExternalStorageDirectory(), "DownLS10")
 
     private fun createPendingDownload(context: Context, fileName: String): Uri? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
@@ -694,9 +698,8 @@ object DownloadsRepository {
             ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, type)
-                if (includeRelativePath) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/")
-                }
+                // نحافظ على المسار المطلوب حتى في محاولات التوافق البديلة.
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "DownLS10/")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
 
@@ -738,8 +741,8 @@ object DownloadsRepository {
         return resolver.query(
             collection,
             arrayOf(MediaStore.MediaColumns._ID),
-            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
-            arrayOf(fileName),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+            arrayOf(fileName, "DownLS10/"),
             null
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
@@ -811,10 +814,10 @@ object DownloadsRepository {
     private fun isFileNamePresentInDownload(context: Context, fileName: String): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             findDownloadUriByName(context.contentResolver, fileName) != null ||
-                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).exists()
+                File(downloadDirectory(), fileName).exists()
         } else {
             File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                downloadDirectory(),
                 fileName
             ).exists()
         }
