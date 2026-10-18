@@ -8,23 +8,31 @@ on:
       - '.github/workflows/extract-zip.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   extract:
+    if: hashFiles('DownLS10.zip') != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
-      - name: Extract ZIP
+      - name: Extract project files into repository
         run: |
-          mkdir -p extracted
-          7z x DownLS10.zip -oextracted -y
-          find extracted -maxdepth 4 -type f | head -200
-      - name: Save extracted files
-        uses: actions/upload-artifact@v4
-        with:
-          name: extracted-project
-          path: extracted/
-          if-no-files-found: error
+          test -f DownLS10.zip
+          7z x DownLS10.zip -y
+          echo "Extracted files:"
+          find . -maxdepth 3 -type f ! -path './.git/*' | head -200
+      - name: Remove only the ZIP and commit extracted files
+        run: |
+          rm -- DownLS10.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Extract project files and remove ZIP archive"
+            git push
+          else
+            echo "No changes to commit."
+          fi
