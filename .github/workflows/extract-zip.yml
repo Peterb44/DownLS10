@@ -12,19 +12,20 @@ permissions:
 
 jobs:
   extract:
-    if: hashFiles('DownLS10.zip') != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
       - name: Extract project files into repository
+        if: hashFiles('DownLS10.zip') != ''
         run: |
           test -f DownLS10.zip
           7z x DownLS10.zip -y
           echo "Extracted files:"
           find . -maxdepth 3 -type f ! -path './.git/*' | head -200
       - name: Remove only the ZIP and commit extracted files
+        if: hashFiles('DownLS10.zip') != ''
         run: |
           rm -- DownLS10.zip
           git config user.name "github-actions[bot]"
