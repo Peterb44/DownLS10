@@ -31,9 +31,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          # GitHub blocks the Actions token from pushing new workflow files.
-          # Keep the build workflow in the ZIP for now; commit all other project files.
-          git reset -- .github/workflows/build-apk.yml || true
+          # GitHub App token cannot add/update workflow files from the ZIP.
+          # Exclude all workflow files extracted from the archive; preserve existing workflows.
+          git reset -- .github/workflows/ || true
+          git add -A -- . ":!.github/workflows/*"
           if ! git diff --cached --quiet; then
             git commit -m "Extract project files and remove ZIP archive"
             git push
