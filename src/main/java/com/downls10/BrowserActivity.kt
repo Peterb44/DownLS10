@@ -1137,21 +1137,74 @@ class BrowserActivity : Activity() {
         // جسر قراءة روابط blob: (محمي برمز عشوائي لكل عملية تنزيل)
         webView.addJavascriptInterface(blobBridge, "DownLS10Blob")
 
-        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
             val nameFromHeader = DownloadsRepository.fileNameFromContentDispositionOrNull(contentDisposition)
-            if (url.startsWith("blob:", ignoreCase = true)) {
-                blobBridge.start(webView, url, nameFromHeader, mimeType)
-            } else {
-                DownloadsRepository.startNewDownload(
-                    this,
-                    url,
-                    showToast = true,
-                    suggestedFileName = nameFromHeader,
-                    userAgent = userAgent,
-                    referer = webView.url,
-                    mimeType = mimeType
-                )
+            if (url.startsWith("blob:", ignoreCase = true) || url.startsWith("data:", ignoreCase = true)) {
+                // روابط blob/data تعتمد على بيانات الصفحة نفسها، لذلك نمررها مباشرة للمسار المدعوم.
+                if (url.startsWith("blob:", ignoreCase = true)) {
+                    blobBridge.start(webView, url, nameFromHeader, mimeType)
+                } else {
+                    DownloadsRepository.startNewDownload(this, url, true, nameFromHeader, userAgent, webView.url, mimeType)
+                }
+                return@setDownloadListener
             }
+
+            val guessedName = nameFromHeader ?: runCatching {
+                Uri.decode(Uri.parse(url).lastPathSegment.orEmpty()).substringBefore("?")
+                    .takeIf { it.isNotBlank() && it.contains(".") }
+            }.getOrNull() ?: "download_${System.currentTimeMillis()}"
+
+            val extension = guessedName.substringAfterLast('.', "").lowercase(Locale.US)
+            val typeLabel = mimeType?.takeIf { it.isNotBlank() }
+                ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                ?: "غير معروف"
+            val sizeLabel = if (contentLength > 0L) {
+                android.text.format.Formatter.formatFileSize(this, contentLength)
+            } else {
+                "غير معروف (يُحدَّد عند الاتصال بالخادم)"
+            }
+
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(24, 20, 24, 12)
+            }
+            val icon = ImageView(this).apply {
+                setImageResource(android.R.drawable.stat_sys_download)
+                layoutParams = LinearLayout.LayoutParams(56, 56).apply { marginEnd = 18 }
+                contentDescription = "أيقونة الملف"
+            }
+            val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            details.addView(TextView(this).apply {
+                text = "اسم الملف: $guessedName"
+                textSize = 16f
+            })
+            details.addView(TextView(this).apply {
+                text = "النوع: $typeLabel"
+                textSize = 14f
+                setPadding(0, 8, 0, 0)
+            })
+            details.addView(TextView(this).apply {
+                text = "الحجم: $sizeLabel"
+                textSize = 14f
+                setPadding(0, 8, 0, 0)
+            })
+            panel.addView(icon)
+            panel.addView(details, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+            AlertDialog.Builder(this)
+                .setTitle("تنزيل ملف")
+                .setView(panel)
+                .setPositiveButton("تنزيل") { _, _ ->
+                    DownloadsRepository.startNewDownload(
+                        this, url, true, guessedName, userAgent, webView.url, mimeType
+                    )
+                }
+                .setNeutralButton("إضافة") { _, _ ->
+                    DownloadsRepository.addToQueue(this, url, guessedName, userAgent, webView.url)
+                }
+                .setNegativeButton("إلغاء", null)
+                .show()
         }
     }
 
