@@ -99,6 +99,43 @@ object DownloadsRepository {
      * يبدأ أو يستأنف رابطاً. يدعم http/https وdata:، وعند غموض اسم الملف أو نوعه
      * يستكشف استجابة الخادم أولاً (Content-Disposition + Content-Type + التحويلات).
      */
+    /** يضيف رابطاً إلى قائمة الانتظار دون إنشاء ملف أو بدء تنزيله. */
+    fun addToQueue(
+        context: Context,
+        url: String,
+        fileName: String,
+        userAgent: String? = null,
+        referer: String? = null
+    ) {
+        val appContext = context.applicationContext
+        ensureLoaded(appContext)
+        val cleanUrl = url.trim()
+        if (cleanUrl.isBlank() || !(cleanUrl.startsWith("http://", true) ||
+                    cleanUrl.startsWith("https://", true) || cleanUrl.startsWith("ftp://", true))) {
+            toast(appContext, "هذا الرابط لا يمكن إضافته إلى قائمة الانتظار")
+            return
+        }
+        if (downloadList.any { it.url == cleanUrl && it.state != DownloadState.ERROR }) {
+            toast(appContext, "الرابط موجود في قائمة التنزيلات")
+            return
+        }
+        val safeName = sanitizeFileName(fileName)
+        val item = DownloadItem(
+            id = System.currentTimeMillis(),
+            url = cleanUrl,
+            fileName = safeName,
+            extension = safeName.substringAfterLast(".", "bin"),
+            status = "مضاف إلى قائمة الانتظار",
+            state = DownloadState.PAUSED,
+            userAgent = userAgent,
+            referer = referer
+        )
+        downloadList.add(0, item)
+        DownloadHistory.add(appContext, cleanUrl)
+        notifyChanged(appContext, forceSave = true)
+        toast(appContext, "أُضيف إلى قائمة التنزيلات دون تنزيل")
+    }
+
     fun startNewDownload(
         context: Context,
         url: String,
