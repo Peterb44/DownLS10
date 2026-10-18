@@ -1479,7 +1479,8 @@ class BrowserActivity : Activity() {
             "meigeeks.com",
             "pastebin.com",
             "greatmodapk.com",
-            "downloadatoz.com"
+            "downloadatoz.com",
+            "pastelink.net"
         )
         if (explicitHosts.contains(h)) return true
 
