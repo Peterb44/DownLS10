@@ -1,0 +1,28 @@
+name: Extract ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 7-Zip
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Extract ZIP
+        run: |
+          mkdir extracted
+          7z x DownLS10.zip -oextracted -y
+          ls -la extracted
+
+      - name: Save extracted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-project
+          path: extracted/
