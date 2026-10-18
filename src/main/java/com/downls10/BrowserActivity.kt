@@ -1484,11 +1484,17 @@ class BrowserActivity : Activity() {
         )
         if (explicitHosts.contains(h)) return true
 
-        // تحذير استباقي للمواقع التي تحمل نمطاً واضحاً لمواقع MOD/APK.
-        return h.contains("modapk") ||
-            h.contains("apkmod") ||
-            h.contains("mod-cda") ||
-            h.contains("modcda")
+        // تحذير استباقي للمواقع المشابهة لمواقع APK المعدّلة ومشاركة الروابط/الملفات.
+        // هذا فحص تقريبي لأجزاء اسم النطاق، وليس حكماً بأن الموقع ضار.
+        val suspiciousPatterns = listOf(
+            "apk", "mod", "crack", "hack", "patched", "patcher",
+            "unlocked", "premium", "tweak", "cheat", "paste",
+            "pastelink", "filehost", "file-upload", "downloadatoz"
+        )
+        return suspiciousPatterns.any { h.contains(it) } ||
+            (h.contains("download") && (
+                h.contains("app") || h.contains("file") || h.contains("mod")
+            ))
     }
 
     private fun navigateWithSafetyCheck(webView: WebView, rawUrl: String) {
