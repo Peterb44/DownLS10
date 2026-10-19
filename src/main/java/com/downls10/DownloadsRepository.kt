@@ -324,21 +324,22 @@ object DownloadsRepository {
             referer = referer
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val uri = createPendingDownload(appContext, item.fileName)
-            if (uri == null) {
-                toast(appContext, "تعذّر إنشاء ملف التنزيل داخل Download")
-                return
-            }
-            // إذا كان في Download ملف بنفس الاسم لا يستطيع التطبيق رؤيته، يعيد النظام تسمية الملف الجديد تلقائيًا
-            // إلى «الاسم (1).امتداد». نكتشف ذلك ونلغي التنزيل بدل إنشاء نسخة مكررة.
-            val actualName = queryDisplayName(appContext.contentResolver, uri)
-            if (actualName != null && isAutoRenamedCopy(fileName, actualName)) {
-                deleteUriQuietly(appContext.contentResolver, uri)
+        // تحقق من مجلد التخزين المطلوب وأنه قابل للكتابة قبل إضافة التنزيل.
+        try {
+            val dir = ensureDownloadDirectory()
+            val target = File(dir, item.fileName)
+            if (target.exists()) {
                 toast(appContext, "الملف موجود: $fileName")
                 return
             }
-            item.localUri = uri.toString()
+            if (!target.createNewFile()) {
+                toast(appContext, "تعذّر إنشاء ملف التنزيل: ${target.absolutePath}")
+                return
+            }
+            // يُنشأ الملف هنا للتحقق من صلاحية الكتابة، ومحرك التنزيل سيملؤه لاحقًا.
+        } catch (e: Exception) {
+            toast(appContext, "تعذّر إنشاء مجلد/ملف التنزيل: ${e.message ?: e.javaClass.simpleName}")
+            return
         }
 
         downloadList.add(0, item)
@@ -602,75 +603,49 @@ object DownloadsRepository {
     fun executeDownload(context: Context, item: DownloadItem) {
         val appContext = context.applicationContext
         trackActivities(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val uri = item.localUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
-                ?: createPendingDownload(appContext, item.fileName)?.also { item.localUri = it.toString() }
-            if (uri == null) {
+        val saveDir = try {
+            ensureDownloadDirectory()
+        } catch (e: Exception) {
+            item.state = DownloadState.ERROR
+            item.status = "فشل إنشاء مجلد التنزيلات: ${e.message ?: e.javaClass.simpleName}"
+            notifyChanged(appContext, forceSave = true)
+            return
+        }
+        val targetFile = File(saveDir, item.fileName)
+        if (!targetFile.exists()) {
+            val created = runCatching { targetFile.createNewFile() }.getOrDefault(false)
+            if (!created && !targetFile.isFile) {
                 item.state = DownloadState.ERROR
-                item.status = "فشل: تعذّر إنشاء ملف Download"
+                item.status = "فشل: تعذّر إنشاء الملف ${targetFile.absolutePath}"
                 notifyChanged(appContext, forceSave = true)
                 return
             }
-            downloadEngine.downloadFileToUri(
-                item = item,
-                contentResolver = appContext.contentResolver,
-                uri = uri,
-                onProgress = { progress, speed, downloaded, total ->
-                    item.progress = progress
-                    item.speed = speed
-                    item.downloadedBytes = downloaded
-                    item.status = "جاري التحميل: $progress%"
-                    notifyChanged(appContext)
-                },
-                onComplete = {
-                    toast(appContext, "اكتمل تنزيل الملف: ${item.fileName}")
-                    publishDownload(appContext, uri)
-                    item.progress = 100
-                    item.speed = "0 KB/s"
-                    item.status = "مكتمل"
-                    runCatching { notifyChanged(appContext, forceSave = true) }
-                },
-                onError = { error ->
-                    // إن كان فيه بيانات محمّلة نُبقي الملف الجزئي ليكمل من مكانه عند الاستئناف
-                    if (item.downloadedBytes <= 0L) {
-                        deleteUriQuietly(appContext.contentResolver, uri)
-                        item.localUri = null
-                    }
-                    item.speed = "0 KB/s"
-                    item.status = "فشل: $error"
-                    item.state = DownloadState.ERROR
-                    toast(appContext, "فشل تنزيل الملف: ${item.fileName}")
-                    runCatching { notifyChanged(appContext, forceSave = true) }
-                }
-            )
-        } else {
-            val saveDir = ensureDownloadDirectory()
-            downloadEngine.downloadFile(
-                item = item,
-                saveDir = saveDir,
-                onProgress = { progress, speed, downloaded, total ->
-                    item.progress = progress
-                    item.speed = speed
-                    item.downloadedBytes = downloaded
-                    item.status = "جاري التحميل: $progress%"
-                    notifyChanged(appContext)
-                },
-                onComplete = {
-                    toast(appContext, "اكتمل تنزيل الملف: ${item.fileName}")
-                    item.progress = 100
-                    item.speed = "0 KB/s"
-                    item.status = "مكتمل"
-                    runCatching { notifyChanged(appContext, forceSave = true) }
-                },
-                onError = { error ->
-                    item.speed = "0 KB/s"
-                    item.status = "فشل: $error"
-                    item.state = DownloadState.ERROR
-                    toast(appContext, "فشل تنزيل الملف: ${item.fileName}")
-                    runCatching { notifyChanged(appContext, forceSave = true) }
-                }
-            )
         }
+        downloadEngine.downloadFile(
+            item = item,
+            saveDir = saveDir,
+            onProgress = { progress, speed, downloaded, total ->
+                item.progress = progress
+                item.speed = speed
+                item.downloadedBytes = downloaded
+                item.status = "جاري التحميل: $progress%"
+                notifyChanged(appContext)
+            },
+            onComplete = {
+                toast(appContext, "اكتمل تنزيل الملف: ${item.fileName}")
+                item.progress = 100
+                item.speed = "0 KB/s"
+                item.status = "مكتمل"
+                runCatching { notifyChanged(appContext, forceSave = true) }
+            },
+            onError = { error ->
+                item.speed = "0 KB/s"
+                item.status = "فشل: $error"
+                item.state = DownloadState.ERROR
+                toast(appContext, "فشل تنزيل الملف: ${item.fileName}")
+                runCatching { notifyChanged(appContext, forceSave = true) }
+            }
+        )
     }
 
     fun pauseDownload(context: Context, item: DownloadItem) {
@@ -690,14 +665,8 @@ object DownloadsRepository {
         val appContext = context.applicationContext
         downloadEngine.pauseDownload(item.id)
         if (deleteFileOnDisk || item.state != DownloadState.COMPLETED) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                item.localUri?.let { uriString ->
-                    runCatching { appContext.contentResolver.delete(Uri.parse(uriString), null, null) }
-                }
-            } else {
-                val file = File(downloadDirectory(), item.fileName)
-                if (file.exists()) file.delete()
-            }
+            val file = File(downloadDirectory(), item.fileName)
+            if (file.exists()) runCatching { file.delete() }
         }
         downloadList.remove(item)
         notifyChanged(appContext, forceSave = true)
@@ -706,18 +675,7 @@ object DownloadsRepository {
     /** يتحقق من وجود الملف فعلياً في Download، وليس فقط وجود السجل. */
     fun isFilePresent(context: Context, item: DownloadItem): Boolean {
         if (item.state != DownloadState.COMPLETED) return false
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val uri = item.localUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
-            if (uri != null) {
-                runCatching {
-                    context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { it.moveToFirst() } == true
-                }.getOrDefault(false)
-            } else {
-                findDownloadUriByName(context.contentResolver, item.fileName) != null
-            }
-        } else {
-            File(downloadDirectory(), item.fileName).exists()
-        }
+        return File(downloadDirectory(), item.fileName).isFile
     }
 
     /** مجلد التنزيلات الثابت: /storage/emulated/0/DownLS10/ */
