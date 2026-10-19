@@ -1523,12 +1523,10 @@ class BrowserActivity : Activity() {
         return ext in fileExtensions
     }
 
-    private fun isModApkWarningHost(host: String): Boolean {
+    private fun isUserRequestedNormalHost(host: String): Boolean {
         val h = host.lowercase(Locale.US).removePrefix("www.").removeSuffix(".")
-
-        // تحذير المواقع محددة بالاسم فقط. لا نستخدم كلمات عامة مثل apk أو
-        // download لأنها تظهر في أسماء مواقع سليمة مثل APKMirror.
-        val warningHosts = setOf(
+        // المواقع التي طلب المستخدم فتحها مباشرةً دون نافذة تحذير، ويشمل ذلك نطاقاتها الفرعية.
+        val allowedHosts = setOf(
             "modcda.com",
             "apkstime.com",
             "fastmodapk.com",
@@ -1538,9 +1536,7 @@ class BrowserActivity : Activity() {
             "downloadatoz.com",
             "pastelink.net"
         )
-
-        // يطابق النطاق المحدد أو نطاقاً فرعياً تابعاً له، وليس مجرد تشابه في الاسم.
-        return warningHosts.any { h == it || h.endsWith(".$it") }
+        return allowedHosts.any { h == it || h.endsWith(".$it") }
     }
 
     private fun navigateWithSafetyCheck(webView: WebView, rawUrl: String) {
@@ -1576,8 +1572,10 @@ class BrowserActivity : Activity() {
 
         if (host != null) {
             val normalizedHost = host.lowercase(Locale.US).removePrefix("www.")
-            val match = AdBlocker.matchSafetyCategory(this, host)
-            val modApkWarning = isModApkWarningHost(normalizedHost)
+            val openNormally = isUserRequestedNormalHost(normalizedHost)
+            // المواقع التي حددها المستخدم تُستثنى من نافذة تحذير السلامة كي تفتح مباشرةً.
+            val match = if (openNormally) null else AdBlocker.matchSafetyCategory(this, host)
+            val modApkWarning = false
 
             if (match != null || modApkWarning) {
                 val warningParts = mutableListOf<String>()
@@ -1620,7 +1618,7 @@ class BrowserActivity : Activity() {
             }
         }
 
-        if (uri?.scheme == "http") {
+        if (uri?.scheme == "http" && (uri.host == null || !isUserRequestedNormalHost(uri.host!!))) {
             Toast.makeText(this, "⚠️ هذا الموقع غير آمن (اتصال HTTP غير مشفّر)", Toast.LENGTH_SHORT).show()
         }
 
