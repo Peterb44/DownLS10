@@ -9,6 +9,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.LinkProperties
 import android.net.NetworkRequest
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import java.io.FileInputStream
@@ -56,22 +57,32 @@ class BrowserDnsVpnService : VpnService() {
         var queryBuffer: ByteArray = ByteArray(0)
     )
 
-    private fun refreshUpstreams(linkProperties: LinkProperties?) {
-        val discovered = linkProperties?.dnsServers.orEmpty().distinct()
-        upstreams = discovered
+    private fun isUnderlyingNetwork(network: Network): Boolean {
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun refreshCurrentNetworkDns() {
+        val active = connectivityManager.activeNetwork
+        val candidates = connectivityManager.allNetworks
+        val physical = candidates.firstOrNull { it == active && isUnderlyingNetwork(it) }
+            ?: candidates.firstOrNull { isUnderlyingNetwork(it) }
+        upstreams = physical?.let { connectivityManager.getLinkProperties(it)?.dnsServers }.orEmpty().distinct()
     }
 
     private fun watchNetworkChanges() {
         connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        refreshUpstreams(connectivityManager.getLinkProperties(connectivityManager.activeNetwork))
+        refreshCurrentNetworkDns()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (network == connectivityManager.activeNetwork) {
-                    refreshUpstreams(connectivityManager.getLinkProperties(network))
-                }
+                if (isUnderlyingNetwork(network)) refreshCurrentNetworkDns()
             }
             override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-                if (network == connectivityManager.activeNetwork) refreshUpstreams(linkProperties)
+                if (isUnderlyingNetwork(network)) refreshCurrentNetworkDns()
+            }
+            override fun onLost(network: Network) {
+                if (isUnderlyingNetwork(network)) refreshCurrentNetworkDns()
             }
         }
         networkCallback = callback
