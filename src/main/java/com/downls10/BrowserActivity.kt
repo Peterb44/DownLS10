@@ -1581,47 +1581,9 @@ class BrowserActivity : Activity() {
 
         val host = uri?.host
 
-        if (host != null) {
-            val normalizedHost = host.lowercase(Locale.US).removePrefix("www.")
-            val openNormally = isUserRequestedNormalHost(normalizedHost)
-            // المواقع التي حددها المستخدم تُستثنى من نافذة تحذير السلامة كي تفتح مباشرةً.
-            val match = if (openNormally) null else AdBlocker.matchSafetyCategory(this, host)
-            val modApkWarning = false
-
-            if (match != null || modApkWarning) {
-                val warningParts = mutableListOf<String>()
-
-                if (modApkWarning) {
-                    warningParts.add(
-                        "⚠️ هذا الموقع من المواقع التي طلبتَ إظهار تحذير لها؛ " +
-                            "قد يحتوي على تطبيقات معدلة أو ملفات غير موثوقة. " +
-                            "يمكنك المتابعة إذا كنت تريد فتحه."
-                    )
-                }
-
-                if (match != null) {
-                    when (match.category) {
-                        ListCategory.PORN ->
-                            warningParts.add("⚠️ هذا الموقع موجود في قائمة المحتوى الإباحي.")
-                        ListCategory.MALWARE ->
-                            warningParts.add("⚠️ هذا الموقع موجود في قائمة المواقع المصنفة ببرمجيات خبيثة.")
-                        ListCategory.PHISHING ->
-                            warningParts.add("⚠️ هذا الموقع موجود في قائمة مواقع التصيد الاحتيالي.")
-                        ListCategory.RISK ->
-                            warningParts.add("⚠️ هذا الموقع موجود في قائمة المواقع المشبوهة.")
-                        ListCategory.AD -> Unit
-                    }
-                }
-
-                AlertDialog.Builder(this)
-                    .setTitle("تحذير قبل فتح الموقع")
-                    .setMessage(
-                        warningParts.joinToString("\n\n") +
-                            "\n\nهل تريد فتح هذا الموقع؟"
-                    )
-                    .setPositiveButton("متابعة") { _, _ ->
-                        lastConfirmedSafetyUrl = rawUrl
-                        loadAndRecord(webView, rawUrl)
+        // لا تعرض أي نافذة تحذير أو رسالة Toast عند فتح المواقع.
+        // نترك تحميل الموقع وسلوك بقية المتصفح كما هو.
+        loadAndRecord(webView, rawUrl)
                     }
                     .setNegativeButton("رفض", null)
                     .show()
