@@ -35,6 +35,7 @@ object AdBlocker {
 
     val LISTS = listOf(
         BlockListDef("stevenblack", "StevenBlack", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", ListFormat.HOSTS, ListCategory.AD),
+        BlockListDef("hagezi_pro", "HaGeZi Pro - حجب الإعلانات والتتبّع", "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt", ListFormat.HOSTS, ListCategory.AD),
         BlockListDef(
             "adguard_cname", "AdGuard - متتبعات الطرف الأول (CNAME)",
             "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_trackers_justdomains.txt",
