@@ -127,6 +127,7 @@ object DownloadNotifier {
         val items = DownloadsRepository.downloadList
         val active = items.filter { it.state == DownloadState.DOWNLOADING }
         val paused = items.filter { it.state == DownloadState.PAUSED && DownloadsRepository.isResumable(it) }
+        val completed = items.filter { it.state == DownloadState.COMPLETED }
         val downloading = active.isNotEmpty()
 
         val builder = if (Build.VERSION.SDK_INT >= 26) {
@@ -176,6 +177,17 @@ object DownloadNotifier {
                     Icon.createWithResource(context, android.R.drawable.ic_media_pause), "إيقاف مؤقت", pauseIntent
                 ).build()
             )
+        } else if (paused.isEmpty() && completed.isNotEmpty()) {
+            // لا تُبقِ إشعار التنزيل على 99% بعد اكتمال آخر ملف.
+            val lastCompleted = completed.maxByOrNull { it.id }!!
+            builder.setSmallIcon(android.R.drawable.stat_sys_download_done)
+            builder.setColor(0xFF1B5E20.toInt())
+            builder.setOngoing(false)
+            builder.setCategory(Notification.CATEGORY_STATUS)
+            builder.setContentTitle("مكتمل")
+            builder.setContentText(lastCompleted.fileName)
+            builder.setProgress(0, 0, false)
+            builder.setAutoCancel(true)
         } else {
             builder.setSmallIcon(pauseIcon())   // علامة الإيقاف المؤقت
             builder.setOngoing(false)
