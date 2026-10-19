@@ -737,37 +737,27 @@ object DownloadsRepository {
     }
 
     private fun createPendingDownload(context: Context, fileName: String): Uri? {
-        // أنشئ المسار المطلوب أيضاً على Android 10+؛ وMediaStore يحفظ الملفات داخله عبر RELATIVE_PATH.
-        ensureDownloadDirectory()
+        // Android 10+ uses MediaStore to create the file directly in the requested public folder.
+        // Do NOT call mkdirs() on /storage/emulated/0 here: scoped storage may reject it even
+        // though MediaStore is allowed to create DownLS10/ for this app.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val resolver = context.contentResolver
         val mime = mimeTypeFor(fileName)
 
-        fun values(type: String, includeRelativePath: Boolean = true): ContentValues =
+        fun values(type: String): ContentValues =
             ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, type)
-                // نحافظ على المسار المطلوب حتى في محاولات التوافق البديلة.
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "DownLS10/")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
 
-        // بعض أجهزة Android 10/ROMs لا تتعامل مع مسار MediaStore واحد بشكل ثابت.
-        // نجرب مجموعتي Downloads و Files، مع وبدون RELATIVE_PATH، ثم المسار القديم
-        // الخاص بـ Downloads، حتى لا يفشل إنشاء الملف بعد موافقة المستخدم على التنزيل.
         val attempts = listOf<() -> Uri?>(
             { resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values(mime)) },
             { resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values("application/octet-stream")) },
-            { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values(mime)) },
-            { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values("application/octet-stream")) },
             { resolver.insert(MediaStore.Files.getContentUri("external"), values(mime)) },
-            { resolver.insert(MediaStore.Files.getContentUri("external"), values("application/octet-stream")) },
-            { resolver.insert(MediaStore.Files.getContentUri("external"), values(mime, includeRelativePath = false)) },
-            { resolver.insert(MediaStore.Files.getContentUri("external"), values("application/octet-stream", includeRelativePath = false)) },
-            { resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values(mime, includeRelativePath = false)) },
-            { resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values("application/octet-stream", includeRelativePath = false)) }
+            { resolver.insert(MediaStore.Files.getContentUri("external"), values("application/octet-stream")) }
         )
-
         for (attempt in attempts) {
             val uri = runCatching { attempt() }.getOrNull()
             if (uri != null) return uri
