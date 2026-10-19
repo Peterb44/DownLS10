@@ -909,13 +909,7 @@ class BrowserActivity : Activity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 if (request.isForMainFrame && looksLikeDirectFileUrl(url)) {
-                    DownloadsRepository.startNewDownload(
-                        this@BrowserActivity,
-                        url,
-                        showToast = true,
-                        userAgent = view.settings.userAgentString,
-                        referer = view.url
-                    )
+                    showDownloadOptionsDialog(url, null, view.settings.userAgentString, view.url, null, -1L)
                     return true
                 }
                 if (request.isForMainFrame) {
@@ -1139,22 +1133,37 @@ class BrowserActivity : Activity() {
 
         webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
             val nameFromHeader = DownloadsRepository.fileNameFromContentDispositionOrNull(contentDisposition)
-            if (url.startsWith("blob:", ignoreCase = true) || url.startsWith("data:", ignoreCase = true)) {
-                // روابط blob/data تعتمد على بيانات الصفحة نفسها، لذلك نمررها مباشرة للمسار المدعوم.
-                if (url.startsWith("blob:", ignoreCase = true)) {
-                    blobBridge.start(webView, url, nameFromHeader, mimeType)
-                } else {
-                    DownloadsRepository.startNewDownload(this, url, true, nameFromHeader, userAgent, webView.url, mimeType)
-                }
-                return@setDownloadListener
-            }
-
+            val isLocalData = url.startsWith("blob:", ignoreCase = true) || url.startsWith("data:", ignoreCase = true)
             val guessedName = nameFromHeader ?: runCatching {
                 Uri.decode(Uri.parse(url).lastPathSegment.orEmpty()).substringBefore("?")
                     .takeIf { it.isNotBlank() && it.contains(".") }
             }.getOrNull() ?: "download_${System.currentTimeMillis()}"
 
-            val extension = guessedName.substringAfterLast('.', "").lowercase(Locale.US)
+            if (isLocalData) {
+                val dataMime = mimeType ?: if (url.startsWith("data:", ignoreCase = true)) {
+                    url.substringAfter("data:", "").substringBefore(";").substringBefore(",").takeIf { it.contains("/") }
+                } else null
+                showDownloadOptionsDialog(url, guessedName, userAgent, webView.url, dataMime, contentLength)
+                return@setDownloadListener
+            }
+            showDownloadOptionsDialog(url, guessedName, userAgent, webView.url, mimeType, contentLength)
+        }
+    }
+
+    private fun showDownloadOptionsDialog(
+        url: String,
+        suggestedName: String?,
+        userAgent: String?,
+        referer: String?,
+        mimeType: String?,
+        contentLength: Long
+    ) {
+        val guessedName = suggestedName ?: runCatching {
+            Uri.decode(Uri.parse(url).lastPathSegment.orEmpty()).substringBefore("?")
+                .takeIf { it.isNotBlank() && it.contains(".") }
+        }.getOrNull() ?: ("download_" + System.currentTimeMillis())
+
+        val extension = guessedName.substringAfterLast('.', "").lowercase(Locale.US)
             val typeLabel = mimeType?.takeIf { it.isNotBlank() }
                 ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
                 ?: "غير معروف"
@@ -1192,20 +1201,25 @@ class BrowserActivity : Activity() {
             panel.addView(icon)
             panel.addView(details, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-            AlertDialog.Builder(this)
-                .setTitle("تنزيل ملف")
-                .setView(panel)
-                .setPositiveButton("تنزيل") { _, _ ->
-                    DownloadsRepository.startNewDownload(
-                        this, url, true, guessedName, userAgent, webView.url, mimeType
-                    )
+        AlertDialog.Builder(this)
+            .setTitle("تنزيل ملف")
+            .setView(panel)
+            .setPositiveButton("تنزيل") { _, _ ->
+                if (url.startsWith("blob:", ignoreCase = true)) {
+                    blobBridge.start(currentWebView(), url, guessedName, mimeType)
+                } else {
+                    DownloadsRepository.startNewDownload(this, url, true, guessedName, userAgent, referer, mimeType)
                 }
-                .setNeutralButton("إضافة") { _, _ ->
-                    DownloadsRepository.addToQueue(this, url, guessedName, userAgent, webView.url)
+            }
+            .setNeutralButton("إضافة") { _, _ ->
+                if (url.startsWith("blob:", ignoreCase = true) || url.startsWith("data:", ignoreCase = true)) {
+                    Toast.makeText(this, "هذا النوع من الروابط لا يمكن وضعه في قائمة الانتظار", Toast.LENGTH_LONG).show()
+                } else {
+                    DownloadsRepository.addToQueue(this, url, guessedName, userAgent, referer)
                 }
-                .setNegativeButton("إلغاء", null)
-                .show()
-        }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
