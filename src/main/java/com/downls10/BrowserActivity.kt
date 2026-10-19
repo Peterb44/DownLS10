@@ -1598,18 +1598,6 @@ class BrowserActivity : Activity() {
         // لا تعرض أي نافذة تحذير أو رسالة Toast عند فتح المواقع.
         // نترك تحميل الموقع وسلوك بقية المتصفح كما هو.
         loadAndRecord(webView, rawUrl)
-                    }
-                    .setNegativeButton("رفض", null)
-                    .show()
-                return
-            }
-        }
-
-        if (uri?.scheme == "http" && (uri.host == null || !isUserRequestedNormalHost(uri.host!!))) {
-            Toast.makeText(this, "⚠️ هذا الموقع غير آمن (اتصال HTTP غير مشفّر)", Toast.LENGTH_SHORT).show()
-        }
-
-        loadAndRecord(webView, rawUrl)
     }
 
     // يفتح روابط التطبيقات الخارجية (Google Play, تيليجرام, واتساب, ...).
