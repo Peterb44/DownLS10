@@ -57,10 +57,8 @@ class BrowserDnsVpnService : VpnService() {
     )
 
     private fun refreshUpstreams(linkProperties: LinkProperties?) {
-        val discovered = linkProperties?.dnsServers.orEmpty()
-            .filterIsInstance<java.net.Inet4Address>()
-            .distinct()
-        if (discovered.isNotEmpty()) upstreams = discovered
+        val discovered = linkProperties?.dnsServers.orEmpty().distinct()
+        upstreams = discovered
     }
 
     private fun watchNetworkChanges() {
@@ -87,7 +85,7 @@ class BrowserDnsVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val raw = intent?.getStringArrayListExtra(EXTRA_UPSTREAM_DNS).orEmpty()
         val supplied = raw.mapNotNull { value ->
-            try { InetAddress.getByName(value).takeIf { it is java.net.Inet4Address } } catch (_: Exception) { null }
+            try { InetAddress.getByName(value) } catch (_: Exception) { null }
         }.distinct()
         if (supplied.isNotEmpty()) upstreams = supplied
         if (networkCallback == null) watchNetworkChanges()
