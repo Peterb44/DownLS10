@@ -1525,7 +1525,10 @@ class BrowserActivity : Activity() {
 
     private fun isModApkWarningHost(host: String): Boolean {
         val h = host.lowercase(Locale.US).removePrefix("www.").removeSuffix(".")
-        val explicitHosts = setOf(
+
+        // تحذير المواقع محددة بالاسم فقط. لا نستخدم كلمات عامة مثل apk أو
+        // download لأنها تظهر في أسماء مواقع سليمة مثل APKMirror.
+        val warningHosts = setOf(
             "modcda.com",
             "apkstime.com",
             "fastmodapk.com",
@@ -1535,19 +1538,9 @@ class BrowserActivity : Activity() {
             "downloadatoz.com",
             "pastelink.net"
         )
-        if (explicitHosts.contains(h)) return true
 
-        // تحذير استباقي للمواقع المشابهة لمواقع APK المعدّلة ومشاركة الروابط/الملفات.
-        // هذا فحص تقريبي لأجزاء اسم النطاق، وليس حكماً بأن الموقع ضار.
-        val suspiciousPatterns = listOf(
-            "apk", "mod", "crack", "hack", "patched", "patcher",
-            "unlocked", "premium", "tweak", "cheat", "paste",
-            "pastelink", "filehost", "file-upload", "downloadatoz"
-        )
-        return suspiciousPatterns.any { h.contains(it) } ||
-            (h.contains("download") && (
-                h.contains("app") || h.contains("file") || h.contains("mod")
-            ))
+        // يطابق النطاق المحدد أو نطاقاً فرعياً تابعاً له، وليس مجرد تشابه في الاسم.
+        return warningHosts.any { h == it || h.endsWith(".$it") }
     }
 
     private fun navigateWithSafetyCheck(webView: WebView, rawUrl: String) {
