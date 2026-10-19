@@ -10,7 +10,7 @@ android {
     defaultConfig {
         applicationId 'com.downls10'
         minSdk 24
-        targetSdk 34
+        targetSdk 29
         versionCode 300
         versionName '3.0'
     }
