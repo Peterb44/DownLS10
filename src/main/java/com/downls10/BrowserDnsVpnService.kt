@@ -272,9 +272,18 @@ class BrowserDnsVpnService : VpnService() {
         val framed = ByteArray(answer.size + 2)
         put16(framed, 0, answer.size)
         System.arraycopy(answer, 0, framed, 2, answer.size)
-        val responsePacket = buildTcpPacket(flow, flow.serverNext, flow.clientNext, 0x18, framed)
-        flow.serverNext = (flow.serverNext + framed.size) and 0xffffffffL
-        return listOf(ackPacket, responsePacket)
+        val packets = mutableListOf<ByteArray>()
+        packets.add(ackPacket)
+        var offset = 0
+        while (offset < framed.size) {
+            val end = minOf(offset + 1300, framed.size)
+            val chunk = framed.copyOfRange(offset, end)
+            val flagsOut = 0x18 // PSH + ACK
+            packets.add(buildTcpPacket(flow, flow.serverNext, flow.clientNext, flagsOut, chunk))
+            flow.serverNext = (flow.serverNext + chunk.size) and 0xffffffffL
+            offset = end
+        }
+        return packets
     }
 
     private fun queryUpstreamTcpFirst(query: ByteArray): ByteArray? {
