@@ -10,6 +10,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
+import android.net.VpnService
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -126,6 +128,7 @@ class BrowserActivity : Activity() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val PREFS = "browser_settings"
+    private val DNS_VPN_REQUEST_CODE = 9017
     private fun settingsPrefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun selectedSearchProvider(): String =
@@ -1224,6 +1227,14 @@ class BrowserActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == DNS_VPN_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) startBrowserDnsVpn() else {
+                settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
+                Toast.makeText(this, "لم يتم منح إذن DNS", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
         if (requestCode == FILE_CHOOSER_CODE) {
             val results: Array<Uri>? = if (resultCode == Activity.RESULT_OK && data?.data != null) arrayOf(data.data!!) else null
             filePathCallback?.onReceiveValue(results)
@@ -1772,6 +1783,7 @@ class BrowserActivity : Activity() {
             "السجل",
             "ترجمة إلى العربية",
             "الأذونات",
+            "DNS",
             "البحث",
             if (nightMode) "إيقاف الوضع الليلي" else "تفعيل الوضع الليلي"
         )
@@ -1788,11 +1800,72 @@ class BrowserActivity : Activity() {
                     5 -> showHistoryDialog()
                     6 -> runTranslate()
                     7 -> showPermissionsDialog()
-                    8 -> showSearchProviderDialog()
-                    9 -> toggleNightMode()
+                    8 -> showDnsSettingsDialog()
+                    9 -> showSearchProviderDialog()
+                    10 -> toggleNightMode()
                 }
             }
             .show()
+    }
+
+
+    private fun showDnsSettingsDialog() {
+        val enabled = settingsPrefs().getBoolean("browser_dns_vpn_enabled", false)
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val dns = cm.getLinkProperties(cm.activeNetwork)?.dnsServers
+            ?.joinToString(", ") { it.hostAddress ?: "" }
+            ?.ifBlank { "غير متاح" } ?: "غير متاح"
+        AlertDialog.Builder(this)
+            .setTitle("DNS التطبيق والمتصفح")
+            .setMessage(
+                "DNS التطبيق والمتصفح: ${if (enabled) "مفعّل" else "متوقف"}\n\n" +
+                "عند التفعيل، يستخدم DownLS10 خادم DNS الذي توفره الشبكة الحالية، دون فرض 8.8.8.8 أو 8.8.4.4.\n\n" +
+                "DNS الشبكة الحالي: $dns\n\n" +
+                "DNS نظام أندرويد لا يتم تغييره؛ هذا الإعداد يخص DownLS10 فقط."
+            )
+            .setPositiveButton(if (enabled) "إيقاف DNS" else "تفعيل DNS") { _, _ ->
+                setBrowserDnsEnabled(!enabled)
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
+    }
+
+    private fun setBrowserDnsEnabled(enable: Boolean) {
+        if (!enable) {
+            stopService(Intent(this, BrowserDnsVpnService::class.java))
+            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
+            Toast.makeText(this, "تم إيقاف DNS الخاص بـ DownLS10", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val prepareIntent = VpnService.prepare(this)
+        if (prepareIntent != null) {
+            startActivityForResult(prepareIntent, DNS_VPN_REQUEST_CODE)
+        } else {
+            startBrowserDnsVpn()
+        }
+    }
+
+    private fun startBrowserDnsVpn() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val servers = cm.getLinkProperties(cm.activeNetwork)?.dnsServers
+            ?.mapNotNull { it.hostAddress }
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            .orEmpty()
+        if (servers.isEmpty()) {
+            Toast.makeText(this, "تعذر العثور على DNS الشبكة الحالية", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(this, BrowserDnsVpnService::class.java)
+            .putStringArrayListExtra(BrowserDnsVpnService.EXTRA_UPSTREAM_DNS, ArrayList(servers))
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", true).apply()
+            Toast.makeText(this, "تم تفعيل DNS لـ DownLS10", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
+            Toast.makeText(this, "تعذر تشغيل DNS: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showSearchProviderDialog() {
