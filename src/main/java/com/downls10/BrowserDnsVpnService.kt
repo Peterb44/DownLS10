@@ -82,7 +82,7 @@ class BrowserDnsVpnService : VpnService() {
                 if (isUnderlyingNetwork(network)) refreshCurrentNetworkDns()
             }
             override fun onLost(network: Network) {
-                if (isUnderlyingNetwork(network)) refreshCurrentNetworkDns()
+                refreshCurrentNetworkDns()
             }
         }
         networkCallback = callback
