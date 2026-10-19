@@ -57,7 +57,9 @@ class BrowserDnsVpnService : VpnService() {
         refreshUpstreams(connectivityManager.getLinkProperties(connectivityManager.activeNetwork))
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                refreshUpstreams(connectivityManager.getLinkProperties(network))
+                if (network == connectivityManager.activeNetwork) {
+                    refreshUpstreams(connectivityManager.getLinkProperties(network))
+                }
             }
             override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
                 if (network == connectivityManager.activeNetwork) refreshUpstreams(linkProperties)
@@ -77,7 +79,7 @@ class BrowserDnsVpnService : VpnService() {
             try { InetAddress.getByName(value).takeIf { it is java.net.Inet4Address } } catch (_: Exception) { null }
         }.distinct()
         if (supplied.isNotEmpty()) upstreams = supplied
-        watchNetworkChanges()
+        if (networkCallback == null) watchNetworkChanges()
         if (upstreams.isEmpty()) {
             prefs.edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             stopSelf()
