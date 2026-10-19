@@ -1525,7 +1525,8 @@ class BrowserActivity : Activity() {
 
     private fun isUserRequestedNormalHost(host: String): Boolean {
         val h = host.lowercase(Locale.US).removePrefix("www.").removeSuffix(".")
-        // المواقع التي طلب المستخدم فتحها مباشرةً دون نافذة تحذير، ويشمل ذلك نطاقاتها الفرعية.
+        // مواقع تنزيل APK المعدّلة ومشاركة النصوص/الروابط التي طلب المستخدم فتحها مباشرةً،
+        // مع نطاقاتها الفرعية. نتجنب كلمة "apk" وحدها كي لا نستثني مواقع سليمة مثل APKMirror.
         val allowedHosts = setOf(
             "modcda.com",
             "apkstime.com",
@@ -1536,7 +1537,17 @@ class BrowserActivity : Activity() {
             "downloadatoz.com",
             "pastelink.net"
         )
-        return allowedHosts.any { h == it || h.endsWith(".$it") }
+        if (allowedHosts.any { h == it || h.endsWith(".$it") }) return true
+
+        // دعم مواقع مشابهة لتوزيع APK المعدّل، دون اعتبار كل موقع يحتوي "apk" موقعاً مسموحاً.
+        val labels = h.split(".")
+        return labels.any { label ->
+            val compact = label.replace("-", "").replace("_", "")
+            compact.contains("modapk") ||
+                compact.contains("apkmod") ||
+                compact.contains("fastmodapk") ||
+                compact.contains("modcda")
+        }
     }
 
     private fun navigateWithSafetyCheck(webView: WebView, rawUrl: String) {
