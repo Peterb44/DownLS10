@@ -1853,15 +1853,16 @@ class BrowserActivity : Activity() {
             ?.distinct()
             .orEmpty()
         if (servers.isEmpty()) {
+            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             Toast.makeText(this, "تعذر العثور على DNS الشبكة الحالية", Toast.LENGTH_LONG).show()
             return
         }
         val intent = Intent(this, BrowserDnsVpnService::class.java)
             .putStringArrayListExtra(BrowserDnsVpnService.EXTRA_UPSTREAM_DNS, ArrayList(servers))
         try {
+            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-            settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", true).apply()
-            Toast.makeText(this, "تم تفعيل DNS لـ DownLS10", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "جارٍ تشغيل DNS؛ ستُحفظ الحالة بعد إنشاء اتصال VPN", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             settingsPrefs().edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             Toast.makeText(this, "تعذر تشغيل DNS: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
