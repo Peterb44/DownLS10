@@ -489,8 +489,7 @@ object DownloadsRepository {
                 item.localUri = created.toString()
                 output = appContext.contentResolver.openOutputStream(created, "w")
             } else {
-                val dir = downloadDirectory()
-                if (!dir.exists()) dir.mkdirs()
+                val dir = ensureDownloadDirectory()
                 val target = File(dir, name)
                 file = target
                 output = FileOutputStream(target)
@@ -645,8 +644,7 @@ object DownloadsRepository {
                 }
             )
         } else {
-            val saveDir = downloadDirectory()
-            if (!saveDir.exists()) saveDir.mkdirs()
+            val saveDir = ensureDownloadDirectory()
             downloadEngine.downloadFile(
                 item = item,
                 saveDir = saveDir,
@@ -722,11 +720,25 @@ object DownloadsRepository {
         }
     }
 
-    /** مجلد التنزيلات المطلوب: /sdcard/DownLS10/ */
+    /** مجلد التنزيلات الثابت: /storage/emulated/0/DownLS10/ */
     private fun downloadDirectory(): File =
-        File(Environment.getExternalStorageDirectory(), "DownLS10")
+        File("/storage/emulated/0/DownLS10")
+
+    /** إنشاء المجلد تلقائياً عند غيابه، والتحقق من نجاح الإنشاء. */
+    private fun ensureDownloadDirectory(): File {
+        val dir = downloadDirectory()
+        if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory) {
+            throw IllegalStateException("تعذّر إنشاء مجلد التنزيلات: ${dir.absolutePath}")
+        }
+        if (!dir.isDirectory) {
+            throw IllegalStateException("مسار التنزيل ليس مجلداً: ${dir.absolutePath}")
+        }
+        return dir
+    }
 
     private fun createPendingDownload(context: Context, fileName: String): Uri? {
+        // أنشئ المسار المطلوب أيضاً على Android 10+؛ وMediaStore يحفظ الملفات داخله عبر RELATIVE_PATH.
+        ensureDownloadDirectory()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val resolver = context.contentResolver
         val mime = mimeTypeFor(fileName)
