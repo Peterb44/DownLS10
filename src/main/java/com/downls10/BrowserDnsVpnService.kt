@@ -5,12 +5,19 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.LinkProperties
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Socket
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,20 +40,52 @@ class BrowserDnsVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
-    private var upstreams: List<InetAddress> = emptyList()
+    @Volatile private var upstreams: List<InetAddress> = emptyList()
+    private lateinit var connectivityManager: ConnectivityManager
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private val prefs by lazy { getSharedPreferences("browser_settings", MODE_PRIVATE) }
+
+    private fun refreshUpstreams(linkProperties: LinkProperties?) {
+        val discovered = linkProperties?.dnsServers.orEmpty()
+            .filterIsInstance<java.net.Inet4Address>()
+            .distinct()
+        if (discovered.isNotEmpty()) upstreams = discovered
+    }
+
+    private fun watchNetworkChanges() {
+        connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        refreshUpstreams(connectivityManager.getLinkProperties(connectivityManager.activeNetwork))
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                refreshUpstreams(connectivityManager.getLinkProperties(network))
+            }
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                if (network == connectivityManager.activeNetwork) refreshUpstreams(linkProperties)
+            }
+        }
+        networkCallback = callback
+        try {
+            connectivityManager.registerNetworkCallback(NetworkRequest.Builder().build(), callback)
+        } catch (_: Exception) {
+            networkCallback = null
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val raw = intent?.getStringArrayListExtra(EXTRA_UPSTREAM_DNS).orEmpty()
-        upstreams = raw.mapNotNull { value ->
-            try { InetAddress.getByName(value) } catch (_: Exception) { null }
+        val supplied = raw.mapNotNull { value ->
+            try { InetAddress.getByName(value).takeIf { it is java.net.Inet4Address } } catch (_: Exception) { null }
         }.distinct()
+        if (supplied.isNotEmpty()) upstreams = supplied
+        watchNetworkChanges()
         if (upstreams.isEmpty()) {
+            prefs.edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             stopSelf()
             return START_NOT_STICKY
         }
         startNotification()
         if (!running.get()) startDns()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startNotification() {
@@ -91,6 +130,7 @@ class BrowserDnsVpnService : VpnService() {
                 .establish() ?: throw IllegalStateException("VPN interface unavailable")
             tun = descriptor
             running.set(true)
+            prefs.edit().putBoolean("browser_dns_vpn_enabled", true).apply()
             worker = thread(name = "DownLS10-DNS", isDaemon = true) {
                 val input = FileInputStream(descriptor.fileDescriptor)
                 val output = FileOutputStream(descriptor.fileDescriptor)
@@ -111,6 +151,7 @@ class BrowserDnsVpnService : VpnService() {
             }
         } catch (_: Exception) {
             running.set(false)
+            prefs.edit().putBoolean("browser_dns_vpn_enabled", false).apply()
             try { tun?.close() } catch (_: Exception) {}
             tun = null
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -167,7 +208,13 @@ class BrowserDnsVpnService : VpnService() {
                 val buffer = ByteArray(4096)
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
-                if (response.length >= 12) return buffer.copyOf(response.length)
+                if (response.length >= 12) {
+                    val answer = buffer.copyOf(response.length)
+                    if ((answer[2].toInt() and 0x02) != 0) {
+                        queryUpstreamTcp(server, query)?.let { return it }
+                    }
+                    return answer
+                }
             } catch (_: Exception) {
                 // Try the next DNS server provided by Android.
             } finally {
@@ -177,12 +224,42 @@ class BrowserDnsVpnService : VpnService() {
         return null
     }
 
+    private fun queryUpstreamTcp(server: InetAddress, query: ByteArray): ByteArray? {
+        var socket: Socket? = null
+        return try {
+            socket = Socket()
+            if (!protect(socket)) return null
+            socket.connect(InetSocketAddress(server, 53), 2500)
+            socket.soTimeout = 3500
+            val output = DataOutputStream(socket.getOutputStream())
+            output.writeShort(query.size)
+            output.write(query)
+            output.flush()
+            val input = DataInputStream(socket.getInputStream())
+            val size = input.readUnsignedShort()
+            if (size < 12 || size > 65535) return null
+            ByteArray(size).also { input.readFully(it) }
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { socket?.close() } catch (_: Exception) {}
+        }
+    }
+
     private fun stopDns() {
         running.set(false)
+        try { networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) } } catch (_: Exception) {}
+        networkCallback = null
         try { tun?.close() } catch (_: Exception) {}
         tun = null
         worker = null
+        prefs.edit().putBoolean("browser_dns_vpn_enabled", false).apply()
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    override fun onRevoke() {
+        stopSelf()
+        super.onRevoke()
     }
 
     override fun onDestroy() {
