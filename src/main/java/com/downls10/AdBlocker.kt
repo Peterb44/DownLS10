@@ -72,9 +72,17 @@ object AdBlocker {
 
     private const val PREFS = "adblock_prefs"
     private const val GLOBAL_ENABLED_KEY = "global_adblock_enabled"
+    private const val SAFETY_PROTECTION_ENABLED_KEY = "safety_protection_enabled"
 
     fun isGloballyEnabled(context: Context): Boolean = prefs(context).getBoolean(GLOBAL_ENABLED_KEY, true)
     fun setGloballyEnabled(context: Context, enabled: Boolean) { prefs(context).edit().putBoolean(GLOBAL_ENABLED_KEY, enabled).apply() }
+
+    fun isSafetyProtectionEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(SAFETY_PROTECTION_ENABLED_KEY, true)
+
+    fun setSafetyProtectionEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(SAFETY_PROTECTION_ENABLED_KEY, enabled).apply()
+    }
     private val executor = Executors.newFixedThreadPool(3)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -268,7 +276,7 @@ object AdBlocker {
 
     /** يفحص تصنيف نطاق الصفحة كاملة (إباحي/ضار/احتيالي/مشبوه) - أول قائمة مطابقة مفعّلة فقط */
     fun matchSafetyCategory(context: Context, host: String): BlockListDef? {
-        if (!isGloballyEnabled(context)) return null
+        if (!isSafetyProtectionEnabled(context)) return null
         for (def in LISTS) {
             if (def.category == ListCategory.AD) continue
             if (!isEnabled(context, def.id)) continue

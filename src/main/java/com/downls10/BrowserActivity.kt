@@ -2338,10 +2338,65 @@ class BrowserActivity : Activity() {
 
         fun refresh() {
             container.removeAllViews()
-            val globalRow = LinearLayout(this).apply {
+
+            // قواعد الحماية مستقلة عن مانع الإعلانات وقوائمه.
+            val protectionRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, 8, 0, 16)
+            }
+            protectionRow.addView(TextView(this).apply {
+                text = "قواعد الحماية"
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            protectionRow.addView(Button(this).apply {
+                text = if (AdBlocker.isSafetyProtectionEnabled(this@BrowserActivity)) "مفعّل" else "متوقف"
+                setOnClickListener {
+                    val enabled = !AdBlocker.isSafetyProtectionEnabled(this@BrowserActivity)
+                    AdBlocker.setSafetyProtectionEnabled(this@BrowserActivity, enabled)
+                    tabs.forEach { tab -> if (!tab.isHome) tab.webView.reload() }
+                    refresh()
+                }
+            })
+            protectionRow.addView(Button(this).apply {
+                text = "تحديث"
+                setOnClickListener {
+                    val safetyLists = AdBlocker.LISTS.filter { it.category != ListCategory.AD }
+                    if (safetyLists.isEmpty()) {
+                        Toast.makeText(this@BrowserActivity, "لا توجد قوائم حماية لتحديثها", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    var remaining = safetyLists.size
+                    var failures = 0
+                    safetyLists.forEach { def ->
+                        AdBlocker.updateList(this@BrowserActivity, def.id) { success, _, _ ->
+                            if (!success) failures++
+                            remaining--
+                            if (remaining == 0) {
+                                refresh()
+                                Toast.makeText(
+                                    this@BrowserActivity,
+                                    if (failures == 0) "تم تحديث قواعد الحماية" else "اكتمل تحديث الحماية مع فشل بعض القوائم",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            })
+            container.addView(protectionRow)
+
+            container.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+                setBackgroundColor(Color.parseColor("#333333"))
+            })
+
+            val globalRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 16, 0, 16)
             }
             globalRow.addView(TextView(this).apply {
                 text = "مانع الإعلانات"
@@ -2350,7 +2405,7 @@ class BrowserActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             globalRow.addView(Button(this).apply {
-                text = if (AdBlocker.isGloballyEnabled(this@BrowserActivity)) "مفعّل" else "معطّل"
+                text = if (AdBlocker.isGloballyEnabled(this@BrowserActivity)) "مفعّل" else "متوقف"
                 setOnClickListener {
                     AdBlocker.setGloballyEnabled(this@BrowserActivity, !AdBlocker.isGloballyEnabled(this@BrowserActivity))
                     tabs.forEach { tab -> if (!tab.isHome) tab.webView.reload() }
@@ -2358,6 +2413,7 @@ class BrowserActivity : Activity() {
                 }
             })
             container.addView(globalRow)
+
             AdBlocker.LISTS.forEach { def ->
                 val block = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -2399,7 +2455,7 @@ class BrowserActivity : Activity() {
                 val updateBtn = Button(this).apply {
                     text = "تحديث"
                     setOnClickListener {
-                        AdBlocker.updateList(this@BrowserActivity, def.id) { success, count, error ->
+                        AdBlocker.updateList(this@BrowserActivity, def.id) { success, _, error ->
                             if (!success) {
                                 Toast.makeText(this@BrowserActivity, "${def.displayName}: فشل - $error", Toast.LENGTH_LONG).show()
                             }
@@ -2424,7 +2480,7 @@ class BrowserActivity : Activity() {
         refresh()
 
         AlertDialog.Builder(this)
-            .setTitle("مانع الإعلانات وحماية التصفح")
+            .setTitle("قواعد الحماية ومانع الإعلانات")
             .setView(scroll)
             .setPositiveButton("إغلاق", null)
             .show()
