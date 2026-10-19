@@ -46,11 +46,6 @@ object AdBlocker {
             "https://hostfiles.frogeye.fr/firstparty-trackers-hosts.txt",
             ListFormat.HOSTS, ListCategory.AD
         ),
-        BlockListDef(
-            "fanboy_enhanced_tracking", "Fanboy’s Enhanced Tracking List",
-            "https://fanboy.co.nz/enhancedstats.txt",
-            ListFormat.ABP, ListCategory.AD
-        ),
         BlockListDef("porn", "حجب المواقع الإباحية", "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts", ListFormat.HOSTS, ListCategory.PORN),
     )
 
@@ -59,7 +54,7 @@ object AdBlocker {
         "pgl", "pgl_list", "nocoin", "no_coin", "peter", "peter_lowe", "peter_lowe_ads_tracking",
         "ublock_filters", "ublock_filters_ads", "ublock_origin", "ublock-origin", "ubo",
         "malware", "malware_domains", "phishing", "phishing_domains", "risk", "suspicious",
-        "urlhaus", "openphish", "ublock_annoyances", "easylist_annoyances", "easylist"
+        "urlhaus", "openphish", "ublock_annoyances", "easylist_annoyances", "easylist", "fanboy_enhanced_tracking"
     )
 
     /** يحذف نهائياً بيانات القوائم التي أزيلت من التطبيق حتى لا تبقى في التخزين المحلي. */
