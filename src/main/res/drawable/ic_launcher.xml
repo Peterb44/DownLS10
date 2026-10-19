@@ -5,11 +5,17 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FF6200EE"
+        android:fillColor="#808080"
         android:pathData="M0,0h108v108h-108z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,30 L54,66 M40,52 L54,66 L68,52"
-        android:strokeWidth="5"
-        android:strokeColor="#FFFFFF" />
+    <!-- Bold, clearly visible BD lettering in soft off-white. -->
+    <path android:fillColor="#E6E6E6" android:pathData="M27,30 H34 V78 H27 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M27,30 H49 V37 H27 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M27,50 H47 V57 H27 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M27,71 H49 V78 H27 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M42,30 H49 V53 H42 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M42,55 H49 V78 H42 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M57,30 H64 V78 H57 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M57,30 H78 V37 H57 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M57,71 H78 V78 H57 Z" />
+    <path android:fillColor="#E6E6E6" android:pathData="M71,30 H78 V78 H71 Z" />
 </vector>
