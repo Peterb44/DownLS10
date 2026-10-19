@@ -21,6 +21,7 @@ import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 /**
@@ -40,10 +41,20 @@ class BrowserDnsVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
+    private val tcpFlows = ConcurrentHashMap<String, TcpFlow>()
     @Volatile private var upstreams: List<InetAddress> = emptyList()
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val prefs by lazy { getSharedPreferences("browser_settings", MODE_PRIVATE) }
+
+    private data class TcpFlow(
+        val clientIp: ByteArray,
+        val serverIp: ByteArray,
+        val clientPort: Int,
+        var clientNext: Long,
+        var serverNext: Long,
+        var queryBuffer: ByteArray = ByteArray(0)
+    )
 
     private fun refreshUpstreams(linkProperties: LinkProperties?) {
         val discovered = linkProperties?.dnsServers.orEmpty()
@@ -141,8 +152,8 @@ class BrowserDnsVpnService : VpnService() {
                     while (running.get()) {
                         val count = input.read(packet)
                         if (count <= 0) continue
-                        val response = handleDnsPacket(packet, count)
-                        if (response != null && running.get()) output.write(response)
+                        val responses = handleDnsPacket(packet, count)
+                        if (running.get()) responses.forEach { output.write(it) }
                     }
                 } catch (_: Exception) {
                     // Closing the TUN descriptor ends the worker.
@@ -161,11 +172,20 @@ class BrowserDnsVpnService : VpnService() {
         }
     }
 
-    private fun handleDnsPacket(packet: ByteArray, length: Int): ByteArray? {
-        if (length < 28 || (packet[0].toInt() and 0xF0) != 0x40) return null
+    private fun handleDnsPacket(packet: ByteArray, length: Int): List<ByteArray> {
+        if (length < 20 || (packet[0].toInt() and 0xF0) != 0x40) return emptyList()
         val ipHeaderLength = (packet[0].toInt() and 0x0F) * 4
-        if (ipHeaderLength < 20 || length < ipHeaderLength + 8) return null
-        if ((packet[9].toInt() and 0xff) != 17) return null
+        if (ipHeaderLength < 20 || length < ipHeaderLength) return emptyList()
+        val protocol = packet[9].toInt() and 0xff
+        return when (protocol) {
+            17 -> handleUdpDns(packet, length, ipHeaderLength)?.let { listOf(it) } ?: emptyList()
+            6 -> handleTcpDns(packet, length, ipHeaderLength)
+            else -> emptyList()
+        }
+    }
+
+    private fun handleUdpDns(packet: ByteArray, length: Int, ipHeaderLength: Int): ByteArray? {
+        if (length < ipHeaderLength + 8) return null
         val sourcePort = u16(packet, ipHeaderLength)
         val destinationPort = u16(packet, ipHeaderLength + 2)
         if (destinationPort != 53) return null
@@ -181,7 +201,6 @@ class BrowserDnsVpnService : VpnService() {
         if (totalLength > 65535) return null
         val out = ByteArray(totalLength)
         out[0] = 0x45
-        out[1] = 0
         put16(out, 2, totalLength)
         put16(out, 4, u16(packet, 4))
         put16(out, 6, 0x4000)
@@ -193,9 +212,130 @@ class BrowserDnsVpnService : VpnService() {
         put16(out, 20, 53)
         put16(out, 22, sourcePort)
         put16(out, 24, 8 + answer.size)
-        put16(out, 26, 0)
         System.arraycopy(answer, 0, out, 28, answer.size)
+        put16(out, 26, transportChecksum(out, 20, 8 + answer.size, 17))
         return out
+    }
+
+    /**
+     * Minimal DNS-over-TCP endpoint for port 53 inside the per-app VPN.
+     * It handles the TCP handshake, length-prefixed DNS query, response and close.
+     */
+    private fun handleTcpDns(packet: ByteArray, length: Int, ipHeaderLength: Int): List<ByteArray> {
+        if (length < ipHeaderLength + 20) return emptyList()
+        val tcpOffset = ipHeaderLength
+        val sourcePort = u16(packet, tcpOffset)
+        val destinationPort = u16(packet, tcpOffset + 2)
+        if (destinationPort != 53) return emptyList()
+        val seq = u32(packet, tcpOffset + 4)
+        val ack = u32(packet, tcpOffset + 8)
+        val tcpHeaderLength = ((packet[tcpOffset + 12].toInt() ushr 4) and 0x0f) * 4
+        if (tcpHeaderLength < 20 || length < tcpOffset + tcpHeaderLength) return emptyList()
+        val flags = packet[tcpOffset + 13].toInt() and 0xff
+        val syn = (flags and 0x02) != 0
+        val ackFlag = (flags and 0x10) != 0
+        val fin = (flags and 0x01) != 0
+        val rst = (flags and 0x04) != 0
+        val clientIp = packet.copyOfRange(12, 16)
+        val serverIp = packet.copyOfRange(16, 20)
+        val key = clientIp.joinToString(".") { (it.toInt() and 255).toString() } + ":" + sourcePort
+        if (rst) {
+            tcpFlows.remove(key)
+            return emptyList()
+        }
+        if (syn && !ackFlag) {
+            val serverSeq = (key.hashCode().toLong() and 0xffffffffL)
+            val flow = TcpFlow(clientIp, serverIp, sourcePort, (seq + 1) and 0xffffffffL, (serverSeq + 1) and 0xffffffffL)
+            tcpFlows[key] = flow
+            return listOf(buildTcpPacket(flow, serverSeq, flow.clientNext, 0x12, ByteArray(0)))
+        }
+        val flow = tcpFlows[key] ?: return emptyList()
+        if (fin) {
+            flow.clientNext = (seq + 1) and 0xffffffffL
+            val reply = buildTcpPacket(flow, flow.serverNext, flow.clientNext, 0x11, ByteArray(0))
+            tcpFlows.remove(key)
+            return listOf(reply)
+        }
+        if (!ackFlag || seq != flow.clientNext) return emptyList()
+        val payloadStart = tcpOffset + tcpHeaderLength
+        val payloadLength = length - payloadStart
+        if (payloadLength <= 0) return emptyList()
+        flow.clientNext = (flow.clientNext + payloadLength) and 0xffffffffL
+        flow.queryBuffer = flow.queryBuffer + packet.copyOfRange(payloadStart, length)
+        val ackPacket = buildTcpPacket(flow, flow.serverNext, flow.clientNext, 0x10, ByteArray(0))
+        if (flow.queryBuffer.size < 2) return listOf(ackPacket)
+        val expected = u16(flow.queryBuffer, 0)
+        if (expected < 12 || flow.queryBuffer.size < expected + 2) return listOf(ackPacket)
+        val query = flow.queryBuffer.copyOfRange(2, expected + 2)
+        flow.queryBuffer = flow.queryBuffer.copyOfRange(expected + 2, flow.queryBuffer.size)
+        val answer = queryUpstreamTcpFirst(query) ?: return listOf(ackPacket)
+        val framed = ByteArray(answer.size + 2)
+        put16(framed, 0, answer.size)
+        System.arraycopy(answer, 0, framed, 2, answer.size)
+        val responsePacket = buildTcpPacket(flow, flow.serverNext, flow.clientNext, 0x18, framed)
+        flow.serverNext = (flow.serverNext + framed.size) and 0xffffffffL
+        return listOf(ackPacket, responsePacket)
+    }
+
+    private fun queryUpstreamTcpFirst(query: ByteArray): ByteArray? {
+        for (server in upstreams) {
+            queryUpstreamTcp(server, query)?.let { return it }
+        }
+        return queryUpstream(query)
+    }
+
+    private fun buildTcpPacket(flow: TcpFlow, seq: Long, ack: Long, flags: Int, payload: ByteArray): ByteArray {
+        val total = 20 + 20 + payload.size
+        val out = ByteArray(total)
+        out[0] = 0x45
+        put16(out, 2, total)
+        put16(out, 4, 0)
+        put16(out, 6, 0x4000)
+        out[8] = 64
+        out[9] = 6
+        System.arraycopy(flow.serverIp, 0, out, 12, 4)
+        System.arraycopy(flow.clientIp, 0, out, 16, 4)
+        put16(out, 10, checksum(out, 0, 20))
+        put16(out, 20, 53)
+        put16(out, 22, flow.clientPort)
+        put32(out, 24, seq)
+        put32(out, 28, ack)
+        out[32] = 0x50
+        out[33] = flags.toByte()
+        put16(out, 34, 65535)
+        put16(out, 36, 0)
+        put16(out, 38, 0)
+        if (payload.isNotEmpty()) System.arraycopy(payload, 0, out, 40, payload.size)
+        put16(out, 36, transportChecksum(out, 20, 20 + payload.size, 6))
+        return out
+    }
+
+    private fun u32(bytes: ByteArray, offset: Int): Long =
+        ((bytes[offset].toLong() and 255) shl 24) or
+        ((bytes[offset + 1].toLong() and 255) shl 16) or
+        ((bytes[offset + 2].toLong() and 255) shl 8) or
+        (bytes[offset + 3].toLong() and 255)
+
+    private fun put32(bytes: ByteArray, offset: Int, value: Long) {
+        bytes[offset] = (value ushr 24).toByte()
+        bytes[offset + 1] = (value ushr 16).toByte()
+        bytes[offset + 2] = (value ushr 8).toByte()
+        bytes[offset + 3] = value.toByte()
+    }
+
+    private fun transportChecksum(packet: ByteArray, offset: Int, length: Int, protocol: Int): Int {
+        var sum = 0L
+        for (i in 12..18 step 2) sum += u16(packet, i).toLong()
+        sum += protocol.toLong()
+        sum += length.toLong()
+        var index = offset
+        while (index + 1 < offset + length) {
+            sum += u16(packet, index).toLong()
+            index += 2
+        }
+        if (index < offset + length) sum += ((packet[index].toInt() and 255) shl 8).toLong()
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.inv().toInt() and 0xffff
     }
 
     private fun queryUpstream(query: ByteArray): ByteArray? {
@@ -250,6 +390,7 @@ class BrowserDnsVpnService : VpnService() {
 
     private fun stopDns() {
         running.set(false)
+        tcpFlows.clear()
         try { networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) } } catch (_: Exception) {}
         networkCallback = null
         try { tun?.close() } catch (_: Exception) {}
